@@ -1,0 +1,18 @@
+1.The reason the instructions in the trace did not produce the correct mathematical results in %rax is that it stored a value shifted by two bits to the left into %rax. Consider the trace at line 140: 
+0x541efa<arith_driver+506>lisp.h:700    lea 0x0(,%rbx,4),%rax  rax=0xce39231c6f4c71bc
+
+At this point, %rbx contains the correct multiplied value of the 3 parameters used. However, it stores a value 4*(address of rbx), meaning it shifted rbx to the right by 2 bits. This is the cause of the trace not producing the actual result. When you look at the documentation, it states that the smallest integer Emacs Lisp can handle is -2^61, and while the value in %rax at afer the trace is smaller than this number, it explains why the final output of the multiplication is larger than -2^61.
+
+This lea instruction results from the make_number function inside LISP_MACRO_DEFUN in lisp.h, where it masks the value to fit the range of emacs. In lisp.h, it states that Lisp integers use 2 tags, which explains why its value min is -2^61.
+
+2. The reason why most-positive-fixnum is that value is because the range of Emacs int is capped at 2^61-1. Since the lisp integers use 2 bits as tags by default, that limits int to use all 64 bits in x86-64, so the possible range of values in Emacs is 2^62. In two's complement, the max positive number is 2^61-1.
+
+3.If you multiply most-positive-fixnum by 1, it returns -1. Meaning multiplying itself will return +1. This makes sense bitwise since most-positive-fixnum is a large series of 1's lead by a couple 0's, and when you lea that and multiply by 4(shifting by 2), you will get all 1's, aka -1. When this is repeated the output will be 1.
+
+4. The trace should not run into issues with -fsanitize=undefined since the multiplication in the code already takes into account if it will sign overflow. The if statement in data.c that checks for signed multiplication overflow is essentially what -fsanitize=undefined is.
+
+5. -fwrapv shouldn't cause problems either because the way the code checks if overflow occurs makes -fwrapv essentially useless. 
+
+6. If -fwrapv is used, Emacs can simply multiply its parameters together instead of worrying about if the multiplication overflows, since it can just wrap around. 
+
+7. It can cut out a bookean statement that calls another function, 3 declarations, and 2 arithemtic operations. This can significantly increase performance in a long term, but the big O stays the same. In the context of Emacs execution, that can cut down a significant amount of machine instructions that repeatedly check for comparison flags and jumps.

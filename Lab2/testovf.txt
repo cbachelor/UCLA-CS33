@@ -1,0 +1,5 @@
+From a first glance, the -O2 optimization by itself is the shortest code, followed by -fwrapv, and -fsanitize=undefined has the longest assembly code. This makes sense for fsanitize=undefined because it is designed to check if any undefined behavior can occur, namely signed overflow in our function testovf. The fsanitize optimization includes jumps based on whether overflow, and determines the output on whether the overflow occurs.
+
+The -fwrapv assembly code doesn't involve any conditional jumps, but has lines where it adds two operands that will overflow, since it adds LONG_MAX with LONG_MAX. This operation makes sense because we passed -fwrapv, making overflow to wrap around.
+
+The simple  -O2 assembly code is only 2 lines of code including the return call. It xor's itself, because it knows that every time you add LONG_MAX and LONG_MAX it will be smaller than LONG_MAX itself, since the sum will be a negative value, and so in any case the return value will be 0. -O2 optimizes the code based on the x86-64 architecture, and without any checks to consider it produces the shortest assembly.
