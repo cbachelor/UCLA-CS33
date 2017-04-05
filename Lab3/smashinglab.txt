@@ -1,0 +1,125 @@
+After I manually edited the thttpd.c file and patched it, I was successfully able to build it using configure. When I
+was saving the executables with different names, I initially ran into problems and got errors, however  quickly resolved
+the issue by running "make clean" beforehand.
+
+I initially tested if the server worked with some random words written in a text file called haha.txt, and decided to
+just use that as my config file as well.
+
+5.My haha.txt configure file included the characters "qwertyuiopasdfghjklzxcvbnm" repeated over and over till the text
+file was way above 100 characters. Runnning it in gdb with the command: run -C haha.txt -p 13129 -D produced a
+segmentation error message of: *** stack smashing detected ***:
+/w/home.10/ee/ugrad/bachelor/Documents/CS33/Lab3/sthttpd-2.27.0/src/thttpd-sp terminated showing strong stack protection
+actually worked. The backtrace at this point was: #0  0x00007ffff6db0118 in ?? () from /lib64/libgcc_s.so.1 #1
+0x00007ffff6db1019 in _Unwind_Backtrace () from /lib64/libgcc_s.so.1 #2  0x00007ffff76e4be6 in backtrace () from
+/lib64/libc.so.6 #3  0x00007ffff764f344 in __libc_message () from /lib64/libc.so.6 #4  0x00007ffff76e8597 in
+__fortify_fail () from /lib64/libc.so.6 #5  0x00007ffff76e8560 in __stack_chk_fail () from /lib64/libc.so.6 #6
+0x0000000000405056 in read_config (filename=<optimized out>) at thttpd.c:1190 #7  0x6d6e627663787a6c in ?? () #8
+0x6975797472657771 in ?? () #9  0x686766647361706f in ?? () #10 0x627663787a6c6b6a in ?? () #11 0x7974726577716d6e in ??
+() #12 0x66647361706f6975 in ?? () #13 0x63787a6c6b6a6867 in ?? () #14 0x000000006d6e6276 in ?? () #15
+0x0000000000403876 in main (argc=<optimized out>, argv=<optimized out>) at thttpd.c:380 The machine instruction that
+caused this issue is: 0x00007ffff6db0118:  80 39 48        cmpb   $0x48,(%rcx) Since this instruction happens in ?? ()
+instruction from a random address caused by buffer overflow, if we go to the machine instruction beforehand:
+0x0000000000404f31 <read_config+1233>:       0f 85 1a 01 00 00       jne    0x405051 <read_config+1521>
+0x0000000000405051 <read_config+1521>:       e8 5a d4 ff ff  callq  0x4024b0 <__stack_chk_fail@plt> the first line
+checks if the value at the address was the same as the canarie placed by strong-stack-proctection. When it notices its
+not equal, it jumps to a call, which is a random instruction that leads to SIGSEGV, segmentation fault. This crash
+occured because by reading too many characters in the config file beyond what the 100 char array can hold, the buffer
+overflowed, changing the value of the canary. Strong stack protection checks this, and aborts the program if the value
+of the canary is not identical as the initial value once we leave the stack frame, since if they are not equal from when
+the stack frame was created and returned, then buffer overflow occured.
+
+6.The config file called testSet.txt this time contained a series of "1111111111111111" till I had over 100 characters.
+While with fsanitize=address the crash occured, I was unable to get a backtrace. When I type 'bt', I get "No stack."
+However this line:
+
+==4433ERROR: AddressSanitizer: stack-buffer-overflow on address 0xffffc054 at pc 0xf7a955bebp 0xffffbfa8 sp 0xffffbb80
+
+proves that the buffer overflow crash actually occurred.  Also, the output of the flag produced something that looks
+like a stack backtrace:
+
+#0 0xf7a955bd in __interceptor_strchr ../../../../../gcc-6.2.0/libsanitizer/asan/asan_intrceptors.cc:468     #1
+0x804eb76 in read_config /u/ee/ugrad/bachelor/Documents/CS33/Lab3/sthttpd-2.27.0/src/tttpd.c:1018     #2 0x31313130
+(<unknown module>)
+
+The output also gives more information:
+
+This frame has 1 object(s):     [32, 132) 'line' <== Memory access at offset 132 overflows this variable
+
+This signals that overflow occured at the offset 132 of 'line', proving that the crash occured once fsanitize=address
+noticed that there was overflow. Also the last read_config call that occurs is:
+
+ 0x0804eb72<read_config+178>:e839b9ffffcall0x804a4b0<strchr@plt>
+
+ andsteppingintothiscallleadstothousandsoflinesofinstructions,makingtheassemblypartlyuselesstoidentifytheissue.
+
+
+7. This variant was the easiest to crash due to having no restrictions. My testSet.txt configure file included the
+characters "1111111111111111" repeated over and over till the text file was way above 100 characters, making it simpler
+to understand register values later. This caused it to work normally, and got a segfault. The error message read:
+Program received signal SIGSEGC, Segmentation fault. 0x00000000000404d9f in read_config (filename=<optimized out>) at
+thttpd.c:1190 With a backtrace, I got: #0  0x0000000000404d9f in read_config (filename=<optimized out>) at thttpd.c:1190
+#1  0x6d6e627663787a6c in ?? () #2  0x6975797472657771 in ?? () #3  0x686766647361706f in ?? () #4  0x627663787a6c6b6a
+in ?? () #5  0x7974726577716d6e in ?? () #6  0x66647361706f6975 in ?? () #7  0x63787a6c6b6a6867 in ?? () #8
+0x000000006d6e6276 in ?? () #9  0x0000000000403743 in main (argc=<optimized out>, argv=<optimized out>) The assembly
+line that causes issue is: 0x404d9f <read_config+1215>:    c3  retq The issue occuring here is that the address
+returning at this point is of a value larger than 0x00007FFFFFFFFFFF. This raises the Segfault exception, since
+addresses in x86-64 shouldn't be larger than that value. The issue here is somewhat visible in the fact that %rbp has
+the value 0x3131313131313131, which is right below the return address. Since the characters in haha.txt had more than
+100 bytes, all the values including and beyond the return address were overwritten, making the return address a value
+larger than possible in 0x00007FFFFFFFFFFF, resulting in Segfault.
+
+8.In terms of the length of the code, -no had definitely the simplest, followed by -sp and then -as. -no barerly had any
+real conditional checks compared to the other two. THe -sp function had a lot of xor and conditional jump instructions.
+The -as had a lot of movs and allocation depending on the shadow memory. It would allocate extra registers to check if
+the stack would be altered and kept checking between shadow memory and memory allocation, and would call an error if the
+two didn't match. On the other hand -sp had value checking at parts of the stack, to check for canaries, and would call
+and error accordingly if the canary was altered. -AS had alot of comparisons with large constants, checking if the
+memory was altered by smashing, and had incredible amount of jumps and calls attached. -SP seems to have more arithmetic
+operations, when -AS has more movs and comparisons
+
+9.I had major issues with step 9 of Smashing Lab. Initially I spent a good amount of time to find out that my buffer
+started at the address 0x7fffffffcfd0, and the displacement of the return address was 163 bytes from the start. First I
+tried to write the unlink() function into a .c file with the parameter "target.txt" in it, and disassembled it using
+objdump. From just looking at the assembly alone, and after testing it, I realized that the string input wasn't stored
+in the assembly itself. Another major issue I had was with null characters. After a while of searching I realized what I
+had to do with hex2raw executable, which was to take the byte code in objdump and change them into equivalent ASCII
+characters. However, I ran into weird issues that my peers did not have when using these ASCII characters. I was able to
+test and overwrite the return address, to things such as 'AAAAAAA' just for a test. For example, I was able to overwrite
+the address to the start of the buffer, aka 0x7fffffffcfd0. However, when I put ANY byte code that has the byte '00', or
+'^@' in ASCII, meaning if the buffer had any NULL character, the return address automatically gets messed up, to the
+form: 0xa7ffffff... The weird 0x0a byte never goes away from the return address, and even if I tried shifting my return
+position, it will either truncate "0xa7ffffff" or go into SEGFAULT. THere is simply no way that I was able to figure out
+how to get rid of the 0x0a byte in the return address, and the only way to remove it was to remove the existing Null
+ASCII character. I would appreciate if there was any explanation to this issue.
+
+So with the limitation that I cannot use a null byte in my machine code, I had to find alternate methods. For example, a
+simple c code that calls the unlink function with "target.txt" dissassembled as such: 0000000000000000 <main>:    0: 48
+83 ec 08             sub    $0x8,%rsp    4:   bf 00 00 00 00          mov    $0x0,%edi    9:   e8 00 00 00 00 callq  e
+<main+0xe>    e:   31 c0                   xor    %eax,%eax   10:   48 83 c4 08             add    $0x8,%rsp 14:   c3
+retq
+
+  However, since I cannot use the "00" bytes in this code since my return address will get messed up, I manually altered
+  it to:
+
+0000000000000000 <main>:    0:   31 ff                   xor    %edi,%edi    2:   b0 57                   mov $0x57,%al
+4:   4c 89 d7                mov    %r10,%rdi    7:   66 44 89 ef             mov    %r13w,%di    b:   0f 05 syscall
+d:   c3                      retq
+
+   (This is the final assembly I used in part 9). By replacing a mov of 0 which created '00' bytes, I changed it to xor,
+   (and used a systemcall of unlink rather than calling it with callq. This allowed me to avoid the null byte problem.
+
+   I converted the above hex bytes into ASCII with hex2raw, and put it 8 bytes into the buffer. The final buffer is in
+   "hh.txt". Next since I couldn't directly input the address of the text "target.txt" into register %rdi since it would
+   create instructions that had byte code of '00', I had to manipulate the values of registers to input the proper
+   address. By moving %r10, which had a address of 0x7ffffff...., I was able to succesfully input the high order bits of
+   the address, and by manually inputting ASCII value of the address into the %r13 register in the buffer, I took the
+   low order bits of that to make %rdi point to 0x7fffffffd008, where the string "target.txt" was located in the buffer.
+   Finally, I aligned everything in the buffer so that itll return to the start of my byte code, where %rdi was inputted
+   the string, and called the system function unlink(). And when I ran it on lnxsrv07, the whole process works out, and
+   the whole assembly, including unlink(), is called. The last step I couldn't complete, was exactly deleting
+   target.txt. Now in terms of the code injection the whole process is called successfully, and I believe the ONLY
+   reason I cannot destroy "target.txt" is because I CANNOT put a null character after "target.txt" to complete the
+   cstring, since then my return address can never be fixed. I think that unlink uses the NULL byte to recognize the end
+   of the string, and since I have a very strange bug where I can't input the null byte into the buffer, I cannot
+   properly delete target.txt, even though I should be 99% of the way there. I would greatly appreciate if I can figure
+   out why this bug is occuring.

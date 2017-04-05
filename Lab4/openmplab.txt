@@ -1,0 +1,99 @@
+//004608570 Christopher Bachelor
+//OpenMP Lab write up
+
+First, I started off the lab by reading through all of the Open MP lecture 
+slides provided, to properly understand how to utilize the functions and 
+methods available for threading in OpenMP. I ran 'make seq' to find out how 
+long it takes to run the func.c functions, which was around 0.5 seconds. I also 
+ran 'make seq GPROF = 1' and found out that out of the functions func0-5, 
+notable func1 and func5 had the biggest impact in terms of time. 
+
+From glancing at the functions, it was pretty clear that the for loops were 
+where the threading should be utilized the most, so I used the '#pragma omp 
+parallel for' functions alot since they seemed to be a simple way to implement 
+threading in for loops. For func0 and func4, I  essentially just appended that 
+line before the for loop, and saw somewhat of a speed increase, but not too 
+much. From the notes, I easily knew that some of the functions that had a local 
+sum variable needed the 'reduction (+:...)' appended on the #pragma statements 
+to maximize the speed, since it allows for independence in the accumulation 
+variables between loop iterations. The functions that I used reduction were in 
+func3 and func2. I was clearly able to see the speed difference in using and 
+not using reduction.  Initially I wasn't sure whther or not to declare '#pragma 
+omp parallel' for each loop in a single function, and after some testing and 
+thinking about it, came to the conclusion that declaring and redeclaring 
+threads is more time consuming than splitting the same threads in differnt for 
+loops. 
+
+I would run into output errors when I just simply add threads to loops, and 
+from the lecture slides I knew it had to do something with shared variables 
+between threads. So whenever a variable was declared outside of the thread 
+scope, and that variable had a change in value, I added a 'private(...)' to the 
+#pragma line to make sure these variables are local to each thread and not 
+shared. This fixed my output issues.
+
+The most issue I encountered in the assignment was in func1. After reading 
+about nested loops and the command 'collapse()' which allows parallelization in 
+multiple loops, I thought that this was the method to most efficiently run 
+func1. I spent a lot of time making sure that the second chunk of nested loops 
+can be transformed into a perfectly nest loops by moving things around and 
+adding if statements. Making sure the output was the same while maintaining a 
+perfectly nested loop was difficult, and when I was able to complete it, i saw 
+a significant jump in the performance of my code. Here is the initial code 
+below.
+
+void func1(int *seed, int *array, double *arrayX, double *arrayY,
+			double *probability, double *objxy, int *index,
+			int Ones, int iter, int X, int Y, int Z, int n)
+{
+	int i, j;
+	omp_set_num_threads(NUM_THREADS);
+	int index_X, index_Y;
+	int max_size = X*Y*Z;
+#pragma omp parallel
+{
+	#pragma omp for
+   	for(i = 0; i < n; i++){
+   		arrayX[i] += 1 + 5*rand2(seed, i);
+   		arrayY[i] += -2 + 2*rand2(seed, i);
+		probability[i] = 0;
+   	}
+	#pragma omp for collapse(2) private(i, j)
+   	for(i = 0; i<n; i++){
+   		for(j = 0; j < Ones; j++){
+   			int index_X = round(arrayX[i]) + objxy[j*2 + 1];
+   			int index_Y = round(arrayY[i]) + objxy[j*2];
+   			index[i*Ones + j] = fabs(index_X*Y*Z + index_Y*Z + 
+iter);
+   			if(index[i*Ones + j] >= max_size)
+   				index[i*Ones + j] = 0;
+   			probability[i] += (pow((array[index[i*Ones + j]] - 
+100),2) -
+   							  
+pow((array[index[i*Ones + j]]-228),2))/50.0;
+			if(j == Ones-1)
+				probability[i] = probability[i]/((double) Ones);
+		}
+	}       
+}
+}
+
+At the time I was still using 8 threads, and even after optimizing all the 
+other functions, I didn't see a major performance boost afterwards. The max 
+time I got at this point was around 0.129 seconds to run func.c. I asked my 
+peers how many threads they had, and they had way more than 8. In my code, it 
+would run into an infinite loop after 16 threads, and so I tested func1 without 
+the collapse tag, and simply left structure of the loop as how it was 
+initially. Then, I was able to run with way more threads. In the notes with the 
+collapse flag, it says collapse is "useful if loop iteration(N) is O(no. of 
+threads) so parallelizing the outer loop makes balancing the load difficult." 
+While I don't have a full explanation of why collapse didn't work with many 
+threads, it seems like it varies with how the loop iterations are set up. 
+
+With the ability to run with more threads, I ran the system function 'cat 
+/proc/cpuinfo' and found that the linux server has 32 processors. Therefore to 
+utilize the hardware I chose my threads to be close to 32 to use all the 
+processes. After testing with some, I found that around 29-26 were the best 
+thread counts, and just purely from testing I chose the number of threads to be 
+27. This bumped my performancce to around 0.037 seconds. At this point I 
+figured I was pretty succesful in improving performance, which was about 13-14 
+times faster than without OpenMP. 
