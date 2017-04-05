@@ -1,0 +1,2 @@
+The details of the lab are documented in the "openmplab.txt" file, and the code was ran under the UCLA SEASnet server, with OpenMP installed.
+Performance of the multithreaded program may change based on the system and enviornment. 

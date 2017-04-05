@@ -2,11 +2,11 @@ After I manually edited the thttpd.c file and patched it, I was successfully abl
 was saving the executables with different names, I initially ran into problems and got errors, however  quickly resolved
 the issue by running "make clean" beforehand.
 
-I initially tested if the server worked with some random words written in a text file called haha.txt, and decided to
+I initially tested if the server worked with some random words written in a text file called exploit.txt, and decided to
 just use that as my config file as well.
 
-5.My haha.txt configure file included the characters "qwertyuiopasdfghjklzxcvbnm" repeated over and over till the text
-file was way above 100 characters. Runnning it in gdb with the command: run -C haha.txt -p 13129 -D produced a
+5.My exploit.txt configure file included the characters "qwertyuiopasdfghjklzxcvbnm" repeated over and over till the text
+file was way above 100 characters. Runnning it in gdb with the command: run -C exploit.txt -p 13129 -D produced a
 segmentation error message of: *** stack smashing detected ***:
 /w/home.10/ee/ugrad/bachelor/Documents/CS33/Lab3/sthttpd-2.27.0/src/thttpd-sp terminated showing strong stack protection
 actually worked. The backtrace at this point was: #0  0x00007ffff6db0118 in ?? () from /lib64/libgcc_s.so.1 #1
@@ -64,7 +64,7 @@ in ?? () #5  0x7974726577716d6e in ?? () #6  0x66647361706f6975 in ?? () #7  0x6
 line that causes issue is: 0x404d9f <read_config+1215>:    c3  retq The issue occuring here is that the address
 returning at this point is of a value larger than 0x00007FFFFFFFFFFF. This raises the Segfault exception, since
 addresses in x86-64 shouldn't be larger than that value. The issue here is somewhat visible in the fact that %rbp has
-the value 0x3131313131313131, which is right below the return address. Since the characters in haha.txt had more than
+the value 0x3131313131313131, which is right below the return address. Since the characters in exploit.txt had more than
 100 bytes, all the values including and beyond the return address were overwritten, making the return address a value
 larger than possible in 0x00007FFFFFFFFFFF, resulting in Segfault.
 
@@ -88,21 +88,30 @@ test and overwrite the return address, to things such as 'AAAAAAA' just for a te
 the address to the start of the buffer, aka 0x7fffffffcfd0. However, when I put ANY byte code that has the byte '00', or
 '^@' in ASCII, meaning if the buffer had any NULL character, the return address automatically gets messed up, to the
 form: 0xa7ffffff... The weird 0x0a byte never goes away from the return address, and even if I tried shifting my return
-position, it will either truncate "0xa7ffffff" or go into SEGFAULT. THere is simply no way that I was able to figure out
+position, it will either truncate "0xa7ffffff" or go into SEGFAULT. There was simply no way that I was able to figure out
 how to get rid of the 0x0a byte in the return address, and the only way to remove it was to remove the existing Null
-ASCII character. I would appreciate if there was any explanation to this issue.
+ASCII character. 
 
 So with the limitation that I cannot use a null byte in my machine code, I had to find alternate methods. For example, a
-simple c code that calls the unlink function with "target.txt" dissassembled as such: 0000000000000000 <main>:    0: 48
-83 ec 08             sub    $0x8,%rsp    4:   bf 00 00 00 00          mov    $0x0,%edi    9:   e8 00 00 00 00 callq  e
-<main+0xe>    e:   31 c0                   xor    %eax,%eax   10:   48 83 c4 08             add    $0x8,%rsp 14:   c3
-retq
+simple c code that calls the unlink function with "target.txt" dissassembled as such:
+ 0000000000000000 <main>:  
+   0: 48 83 ec 08             sub    $0x8,%rsp    
+   4: bf 00 00 00 00          mov    $0x0,%edi    
+   9: e8 00 00 00 00          callq  e <main+0xe>    
+   e: 31 c0                   xor    %eax,%eax   
+   10: 48 83 c4 08            add    $0x8,%rsp 
+   14:                        c3
+                              retq
 
   However, since I cannot use the "00" bytes in this code since my return address will get messed up, I manually altered
   it to:
 
-0000000000000000 <main>:    0:   31 ff                   xor    %edi,%edi    2:   b0 57                   mov $0x57,%al
-4:   4c 89 d7                mov    %r10,%rdi    7:   66 44 89 ef             mov    %r13w,%di    b:   0f 05 syscall
+0000000000000000 <main>:    
+0:   31 ff                   xor    %edi,%edi   
+2:   b0 57                   mov $0x57,%al
+4:   4c 89 d7                mov    %r10,%rdi    
+7:   66 44 89 ef             mov    %r13w,%di    
+b:   0f 05                   syscall
 d:   c3                      retq
 
    (This is the final assembly I used in part 9). By replacing a mov of 0 which created '00' bytes, I changed it to xor,
@@ -120,6 +129,5 @@ d:   c3                      retq
    target.txt. Now in terms of the code injection the whole process is called successfully, and I believe the ONLY
    reason I cannot destroy "target.txt" is because I CANNOT put a null character after "target.txt" to complete the
    cstring, since then my return address can never be fixed. I think that unlink uses the NULL byte to recognize the end
-   of the string, and since I have a very strange bug where I can't input the null byte into the buffer, I cannot
-   properly delete target.txt, even though I should be 99% of the way there. I would greatly appreciate if I can figure
-   out why this bug is occuring.
+   of the string, and since I have a very strange bug where I can't input the null byte into the buffer, I was not able to 
+   properly delete target.txt
